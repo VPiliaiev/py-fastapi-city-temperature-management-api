@@ -1,7 +1,11 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+
+from cities.models import DBCity
+from temperature.models import DBTemperature
 from temperature import models, schemas
 from cities import crud
+from temperature.utils import fetch_temperature
 
 
 async def create_temperature(db: AsyncSession, temp: schemas.TemperatureCreate):
@@ -28,12 +32,25 @@ async def get_temperatures_by_city(db: AsyncSession, city_id: int):
 
 
 async def update_all_temperatures(db: AsyncSession):
-    from temperature.utils import fetch_temperature
-    from cities.crud import get_all_cities
-    cities = await get_all_cities(db)
-    temps = []
+    result = await db.execute(select(DBCity))
+    cities = result.scalars().all()
+
+    created_records = []
+
     for city in cities:
-        temp_value = await fetch_temperature(city.name)
-        temp = schemas.TemperatureCreate(city_id=city.id, temperature=temp_value)
-        temps.append(await create_temperature(db, temp))
-    return temps
+        temp = await fetch_temperature(city.name)
+
+        if temp is None:
+            continue
+
+        db_temp = DBTemperature(
+            city_id=city.id,
+            temperature=temp,
+        )
+
+        db.add(db_temp)
+        created_records.append(db_temp)
+
+    await db.commit()
+
+    return created_records
